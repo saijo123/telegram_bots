@@ -7,15 +7,17 @@ from tqdm import tqdm
 import os
 import pickledb
 import telethon.sync
+import subprocess
 
 api_id = APIID
 api_hash = APIHASH
 client = TelegramClient('session_name', api_id, api_hash)
 def download_progress(recvd, total):
-	print("downloading... ",(recvd/total)*100)
+	print("downloading... %.2f" %((recvd/total)*100))
+
 	
 	
-def CheckDownloadFile(event):
+async def CheckDownloadFile(event):
 	file_name = event.media.document.attributes[0].file_name
 	file_id = event.media.document.id
 	file_path = DLD_PATH+"/"+file_name
@@ -24,19 +26,20 @@ def CheckDownloadFile(event):
 	print("file id:", file_id)
 	print("file name:", file_name)
 	print("file path:", file_path)
-	print("file size: (%d)", file_size/1024/1024, "MB")
+	print("file size: (%.1f)"%(file_size/1024/1024), "MB")
 	#check if file already downloaded
 	try:
 		fh = open(file_path, 'r')
 		print("open successfull")
 	except FileNotFoundError:
-		print("file not found in nas")
+		await event.reply("File is not found in nas default location")
 		#check if file downloaded in the past , check record
 		
-		db = pickledb.load('downloaded.db', False)
-		print(db.get(file_id))
-		if str(db.get(file_id)) == "file_id":
-			print("we downloaded this file before",file_id)
+		db = open(DLD_DB, "r").read()
+		print(db)
+		if str(file_id) in open(DLD_DB, "r").read():
+			# ~ print("file present in db")
+			await event.reply("but, we downloaded this file in the past")
 		else: 
 			#download the file
 			print("downloading the file", file_name)
@@ -46,9 +49,42 @@ def CheckDownloadFile(event):
 	# ~ if file_size == os.path.getsize(file_path):
 		# ~ print("file fully downloaded")
 
+async def HandleTextMessage(event):
+	text = event.text
+	if "cmd" in str(text):
+		print("cmd for execution")
+		cmd = ''
+		args = ' '
+		cmd_text = text.split("cmd ")[1]
+		try:
+			cmd = cmd_text.split(" ")[0]
+			args = cmd_text.split(" ")[1]
+		except:
+			# ~ print("no args - fall through")
+			cmd = cmd_text
+		print(cmd)
+		print(args)
+		if args == "":
+			# ~ print("with args")
+			result = subprocess.Popen([cmd, args], stdout=subprocess.PIPE,
+											 stderr=subprocess.PIPE)
+		else:
+			# ~ print("without args")
+			result = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+											 stderr=subprocess.PIPE)
+
+			
+		out, err = result.communicate()
+		# ~ print("out",out)
+		# ~ print("err",err)
+		await event.reply(out.decode('utf-8'))
+		await event.reply(err.decode('utf-8'))
+
+		
+
 @client.on(events.NewMessage)
 async def event_handler(event):
-	db = pickledb.load('downloaded.db', False)
+	db = pickledb.load(DLD_DB, False)
 	# check valid use r
 	if str(event.from_id) not in  valid_users:
 		print("invalid user")
@@ -63,23 +99,21 @@ async def event_handler(event):
 	#check text or file for download
 	if event.media == None:
 		print ("text message")
-		#HandleTextMessage(msg['text'])
+		await HandleTextMessage(event)
 		
 	else: 
 		print ("file for download")
 		#event.reply("file for download")
-		if(CheckDownloadFile(event)):
-			print("downlaoding")
+		if(await CheckDownloadFile(event)):
+			await event.reply("Downlaoding.. ")
 			output = await client.download_media(event.media, 
 						file=DLD_PATH , 
 						progress_callback=download_progress)	
 			db.set(event.media.document.id, 'file_id')
-			print("db set")
-			print(db.dump())
-			print(db.getall())
+			await event.reply("Download completed.")
 
 		else:
-			print("file not downloaded")
+			await event.reply("Download cancelled")
 
 
 client.start()
